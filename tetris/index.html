@@ -1,0 +1,193 @@
+<!doctype html>
+<html>
+<head>  
+    <title>俄罗斯方块</title>
+    <meta charset="utf-8">
+    <script src="./lib/phaser.min.js"></script>
+    <script src="tetris-core.js"></script>
+	<style type="text/css">
+		body {margin: 0;padding: 0;	}
+		canvas{margin:0 auto;}
+		#gamebox {
+			position: absolute;width: 100%;height: 100%;left:0;top:0;
+		}
+	</style>
+</head>
+<body>
+<div id="gamebox"></div>
+<script type="text/javascript">
+
+window.onload = function(){
+	var game = new Phaser.Game(340, 480, Phaser.CANVAS, 'gamebox');
+	game.state.add("main",GameState,true);
+};
+
+var GameState = function(game){
+	this.over = false;
+	this.moving = false;
+	this.lastY = 0;
+	this.checkLine = 0;
+	this.clearing = false;
+	this.gridLines = [];
+	this.gridGroup = null;
+
+	this.speed = 300;
+
+	var cursor;
+
+	var iwidth = 16;
+	var iheight = 22;
+
+	var tetris = new TetrisCore(iwidth,iheight);
+	tetris.reset();
+
+	this.preload = function(){
+		this.load.spritesheet("colors", "16color.png", 20, 20);  
+	};
+
+	this.createShape = function(){
+		var shapeData = tetris.getShapeData();
+		this.shapeSprite.reset(iwidth*20 - shapeData.x * 20 + 10, iheight*20 - shapeData.y * 20 + 10);
+		this.shapeSprite.removeChildren();
+		for(var i=0;i<shapeData.data.length;i++){
+			for(var p=0;p<4;p++){
+				if(shapeData.data[i] & (1 << p)){
+					var shape = this.game.make.sprite(p*-20-20, -20*i-20, "colors", 7);
+					this.shapeSprite.addChild(shape);
+				}
+			}
+		}
+	}
+	this.drawLineSprite = function(line,value){
+		line.lineValue = value;
+		var isFull = (value === (1<<iwidth)-1 );
+		if(line.spriteArr===undefined){//没有数组，新创建的？
+			line.spriteArr = [];
+			for(var p=0; p< iwidth ; p++){
+				var newSprite = line.addChild(game.make.sprite(p*20, -20, "colors", isFull?4:7));
+				if((value & ((1<<(iwidth-1)) >> p))==0){
+					newSprite.kill();
+				}
+				line.spriteArr.push(newSprite);
+			}
+		}else{
+			for(var p=0;p<iwidth;p++){
+				if(value & ((1<<(iwidth-1)) >> p)){
+					line.spriteArr[p].reset(p*20, -20);
+					line.spriteArr[p].frame = isFull?4:7;
+				}else{
+					line.spriteArr[p].kill();
+				}
+			}
+		}
+	};
+	this.renderLines = function(){
+		for (var i=0; i<4; i++){
+			var idx = this.lastY + i;
+			if(idx > this.gridLines.length){ break; }
+			if(idx == this.gridLines.length){
+				this.gridLines.push(this.gridGroup.getFirstDead(true,10, iheight*20 - idx * 20 + 10));
+			}
+			this.drawLineSprite(this.gridLines[idx], tetris.bgArr[idx])
+		}
+	};
+	this.refreshLines = function(){
+		for(var i=3; i>=0; i--){
+			var idx = this.lastY + i;
+			if(idx < this.gridLines.length){
+				if(this.gridLines[idx].lineValue==((1<<iwidth)-1)){
+					this.gridLines[idx].kill();
+					this.gridLines.splice(idx, 1);
+				}
+			}
+		}
+		for(var i=this.lastY; i<this.gridLines.length; i++){ //lastY行以上的全部下降
+			this.gridLines[i].reset(10, iheight*20 - i * 20 + 10);
+		}
+	};
+
+	this.create = function(){
+		var grid = game.create.grid("grid", 321, 441, 20, 20, "rgba(80,80,80,0.8)");
+		this.gridSprite = game.add.sprite(10, 10, grid);
+
+		this.gridGroup = game.add.group(); 
+
+		this.shapeSprite = this.game.add.sprite();
+		tetris.newShape();
+		this.createShape();
+
+		this.loops = game.time.events.loop(this.speed, function(){
+			if(this.over){return}
+			this.moving = true;
+			if(this.clearing){//需要消除满行时，跳出循环，以完成消除动画时长
+				this.clearing = false;
+				return;
+			}
+			if(this.checkLine>0){
+				this.refreshLines();
+				this.checkLine = 0;
+			}
+			if(!tetris.moveDown()){
+				this.lastY = tetris.movingY; // 记录位置
+				this.renderLines();   // 画出位置的对应4行
+				if(tetris.bgArr.length > iheight){
+					this.over = true;
+					alert("Game Over");
+					return;
+				}else{
+					tetris.newShape();
+					this.createShape();
+				}
+				this.checkLine = tetris.checkData(); 
+				if(this.checkLine>0){
+					this.clearing = true;
+					this.loops.delay = this.speed;//恢复默认速度（因为前面可能是快速下降，遇到有消除时恢复速度）
+				}
+			}else{
+				var nextY = iheight*20 - tetris.movingY * 20 + 10;
+				//this.shapeSprite.y = nextY;
+				this.game.add.tween(this.shapeSprite).to({y:nextY},this.loops.delay>200?100:this.loops.delay/2,"Linear",true);
+			}
+			this.moving = false;
+		}, this);
+
+		cursors = game.input.keyboard.createCursorKeys();
+		cursors.left.onDown.add(function(){
+			if(!this.moving && !this.clearing ){
+				tetris.moveLeft();
+				this.shapeSprite.x = iwidth*20 - tetris.movingX * 20 + 10;
+			}
+		},this);
+		cursors.right.onDown.add(function(){
+			if(!this.moving && !this.clearing){
+				tetris.moveRight();
+				this.shapeSprite.x = iwidth*20 - tetris.movingX * 20 + 10;
+			}
+		},this);
+		cursors.up.onDown.add(function(){
+			if(!this.moving && !this.clearing){
+				if(tetris.rotate()){ this.createShape(); }
+			}
+		},this);
+		cursors.down.onDown.add(function(){
+			if(!this.clearing){
+				this.loops.delay = 50;//按下时，加速
+			}
+		},this);
+		cursors.down.onUp.add(function(){
+			this.loops.delay = this.speed;//释放时，恢复速度
+		},this);
+	};
+	this.update=function(){
+		if(cursors.left.isDown && cursors.left.duration>30){
+			cursors.left.reset(false);//一直按下时，重置按键可再次触发onDown事件
+		}
+		if(cursors.right.isDown && cursors.right.duration>30){
+			cursors.right.reset(false);
+		}
+	};
+};
+
+</script>
+</body>
+</html>
